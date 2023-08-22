@@ -7,3 +7,7 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.3.23", features = ["derive"] }
+walkdir = "2.3.3"
+anyhow = { version = "1.0.75", features = ["backtrace"] }
+tree-sitter = "0.20.10"
+tree-sitter-lua = "0.0.19"
