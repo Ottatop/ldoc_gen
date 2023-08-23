@@ -5,6 +5,8 @@
 use std::path::PathBuf;
 
 use clap::Parser;
+use regex::Regex;
+use tree_sitter::Node;
 use walkdir::WalkDir;
 
 fn main() -> anyhow::Result<()> {
@@ -40,38 +42,57 @@ fn main() -> anyhow::Result<()> {
 
         let mut cursor = tree.walk();
 
-        let mut chunks = Vec::<String>::new();
+        let mut chunks = Vec::<Chunk>::new();
 
-        let mut chunk = String::new();
+        // let mut chunks = Vec::<String>::new();
+        //
+        // let mut chunk = String::new();
+
+        let mut comments = Vec::<Node>::new();
+
         let mut prev_line: Option<usize> = None;
         for child in cursor.node().children(&mut cursor) {
             let start_line = child.range().start_point.row;
             if child.kind() == "comment" {
                 if let Some(line) = prev_line {
                     if start_line != line + 1 {
-                        chunk.clear();
+                        comments.clear();
                     }
                 }
 
-                chunk.push_str(child.utf8_text(contents.as_bytes())?);
-                chunk.push('\n');
+                comments.push(child);
                 prev_line = Some(start_line);
             } else if let Some(line) = prev_line {
                 if start_line == line + 1 {
-                    chunk.push_str(child.utf8_text(contents.as_bytes())?);
-                    chunk.push('\n');
+                    let (body, attributes) = parse_comments(&comments, contents.as_bytes())?;
+                    let decl = match child.kind() {
+                        "variable_declaration" => Declaration::Variable(child),
+                        "function_declaration" => Declaration::Function(child),
+                        _ => Declaration::Other(child),
+                    };
+                    let chunk = Chunk {
+                        body,
+                        attributes,
+                        decl,
+                    };
                     chunks.push(chunk);
-                    chunk = String::new();
+                    comments.clear();
                     prev_line = None;
                 }
             } else {
-                chunk.clear();
+                comments.clear();
                 prev_line = None;
             }
         }
 
         for chunk in chunks.iter() {
-            println!("{chunk}");
+            println!();
+            println!("BODY");
+            for node in chunk.body.iter() {
+                println!("{}", node.utf8_text(contents.as_bytes())?);
+            }
+            println!("ATTR");
+            println!("{:?}", chunk.attributes);
         }
     }
 
@@ -85,13 +106,109 @@ struct Args {
     path: PathBuf,
 }
 
-enum Declaration {
-    Function(String),
-    Variable(String),
+#[derive(Debug)]
+enum Declaration<'a> {
+    Function(Node<'a>),
+    Variable(Node<'a>),
+    Other(Node<'a>),
 }
 
-struct Chunk {
-    body: String,
-    attributes: Vec<(String, String)>,
-    decl: Declaration,
+#[derive(Debug)]
+struct Chunk<'a> {
+    /// The summary bits
+    body: Vec<Node<'a>>,
+    /// The bits that start with ---@attrib
+    attributes: Vec<Attribute>,
+    /// The thing being annotated
+    decl: Declaration<'a>,
+}
+
+#[derive(Debug)]
+enum Attribute {
+    Param {
+        name: String,
+        ty: String,
+        desc: Option<String>,
+    },
+    Return {
+        ty: String,
+        name: Option<String>,
+        desc: Option<String>,
+    },
+    Class {
+        ty: String,
+    },
+    See {
+        link: String,
+        desc: Option<String>,
+    },
+}
+
+fn parse_comments<'a>(
+    comments: &[Node<'a>],
+    source: &[u8],
+) -> anyhow::Result<(Vec<Node<'a>>, Vec<Attribute>)> {
+    // filter actual comments
+    let re = Regex::new(r"^[ \t]*---[ \t]*(@|\|)?").unwrap();
+    let comments = comments
+        .iter()
+        .filter(|comment| comment.utf8_text(source).is_ok_and(|s| re.is_match(s)))
+        .collect::<Vec<_>>();
+
+    let param_re = Regex::new(
+        r"^[ \t]*---[ \t]*@param[ \t]+(?<name>\w+)[ \t]+(?<ty>(\{.*\}|\w+)\??(\|(\{.*\}|\w+)\??)*)([ \t]+(?<desc>.*$))?"
+    ).unwrap();
+
+    let return_re = Regex::new(
+        r"^[ \t]*---[ \t]*@return[ \t]+(?<ty>(\{.*\}|\w+)\??(\|(\{.*\}|\w+)\??)*)([ \t]+(?<name>\w+)([ \t]+(?<desc>.*$))?)?"
+    ).unwrap();
+
+    let see_re =
+        Regex::new(r"^[ \t]*---[ \t]*@see[ \t]+(?<link>\w+(\.\w+)?)([ \t]+(?<desc>.*$))?").unwrap();
+
+    let class_re = Regex::new(r"^[ \t]*---[ \t]*@class[ \t]+(?<ty>\w+)").unwrap();
+
+    let mut body = Vec::<Node>::new();
+    let mut attributes = Vec::<Attribute>::new();
+    for comment in comments {
+        let text = comment.utf8_text(source)?; // TODO: not ?, continue
+        let attr = if let Some(captures) = param_re.captures(text) {
+            (|| {
+                Some(Attribute::Param {
+                    name: captures.name("name")?.as_str().to_string(),
+                    ty: captures.name("ty")?.as_str().to_string(),
+                    desc: captures.name("desc").map(|desc| desc.as_str().to_string()),
+                })
+            })()
+        } else if let Some(captures) = return_re.captures(text) {
+            (|| {
+                Some(Attribute::Return {
+                    ty: captures.name("ty")?.as_str().to_string(),
+                    name: captures.name("name").map(|desc| desc.as_str().to_string()),
+                    desc: captures.name("desc").map(|desc| desc.as_str().to_string()),
+                })
+            })()
+        } else if let Some(captures) = see_re.captures(text) {
+            (|| {
+                Some(Attribute::See {
+                    link: captures.name("link")?.as_str().to_string(),
+                    desc: captures.name("desc").map(|desc| desc.as_str().to_string()),
+                })
+            })()
+        } else if let Some(captures) = class_re.captures(text) {
+            (|| {
+                Some(Attribute::Class {
+                    ty: captures.name("ty")?.as_str().to_string(),
+                })
+            })()
+        } else {
+            body.push(*comment);
+            None
+        };
+
+        if let Some(attr) = attr {
+            attributes.push(attr);
+        }
+    }
+    Ok((body, attributes))
 }
