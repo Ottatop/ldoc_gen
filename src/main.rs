@@ -167,6 +167,8 @@ fn main() -> anyhow::Result<()> {
 
         crate::attr::replace_examples(&mut ldoc_text);
 
+        crate::attr::replace_fences(&mut ldoc_text);
+
         std::fs::write(out_dir.join(entry.file_name()), ldoc_text)?;
     }
 

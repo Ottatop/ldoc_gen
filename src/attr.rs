@@ -87,6 +87,7 @@ pub struct AttrRegexes {
     pub classmod: Regex,
     pub alias: Regex,
     pub example: Regex,
+    pub fences: regex::Regex,
 }
 
 pub static ATTR_REGEXES: LazyLock<AttrRegexes> = LazyLock::new(|| {
@@ -106,6 +107,7 @@ pub static ATTR_REGEXES: LazyLock<AttrRegexes> = LazyLock::new(|| {
             r#"^[ \t]*---[ \t]*@alias[ \t]+(?<name>\w+)[ \t]+(?<ty>(((\{.*\}|table\<(?2),[ \t]*(?2)\>|fun\((\w+:[ \t]*(?2))?(,[ \t]*(?6))*[ \t]*\)(:[ \t]*(?2))?|\w+|".*")(\[\])?\??)|\((?2)\)(\[\])?\??)([ \t]*\|[ \t]*(?2))*)(\s+---[ \t]*\|[ \t]*(?2)([ \t]+(#|--)?[ \t]*.*$)?)*"#
         ).unwrap(),
         example: RegexBuilder::new().multi_line(true).build(r"(^[ \t]*---[ \t]*#{1,5}[ \t]*[E|e]xamples?.*$\s*([ \t]*---\s*)*---[ \t]*```.*$(?<example>(.*$\s*)*?)[ \t]*---[ \t]*```\s*)").unwrap(),
+        fences: regex::RegexBuilder::new(r"(^[ \t]*---[ \t]*```.*\s*(?<lines>([ \t]*---[ \t]*(?<line>(.*$\s*)))*?)[ \t]*---[ \t]*```)").multi_line(true).build().unwrap(),
     }
 });
 
@@ -134,6 +136,30 @@ pub fn replace_examples(source: &mut String) {
     }
 
     *source = new_string;
+}
+
+/// Replace all non example code fences with indents.
+pub fn replace_fences(source: &mut String) {
+    let mut new_lines = source.clone();
+
+    let captures = ATTR_REGEXES.fences.captures_iter(source);
+    for capture in captures {
+        let lines = capture
+            .name("lines")
+            .unwrap()
+            .as_str()
+            .lines()
+            .map(|line| {
+                let line = line.strip_prefix("---").unwrap_or(line);
+                format!("---    {line}\n")
+            })
+            .collect::<String>()
+            .trim_end()
+            .to_string();
+        new_lines = new_lines.replace(capture.get(1).unwrap().as_str(), &lines);
+    }
+
+    *source = new_lines;
 }
 
 /// Extract all @alias from the source, removing them and returning them as [`Attribute`]s.
