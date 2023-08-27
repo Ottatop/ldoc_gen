@@ -27,29 +27,40 @@ impl Chunk<'_> {
             if let Attribute::ClassMod = attr {
                 continue;
             } else if let Attribute::Class { ty } = attr {
+                // println!("got class {ty}");
                 if self
                     .attributes
                     .iter()
                     .any(|a| matches!(a, Attribute::ClassMod))
                 {
+                    // println!("pushing ---@classmod {ty}");
                     ret.push_str(&format!("---@classmod {ty}"));
                 } else {
+                    // println!("pushing {}", attr.to_ldoc_string());
                     ret.push_str(&attr.to_ldoc_string());
                 }
-                ret.push('\n');
             } else {
+                // println!("pushing {}", attr.to_ldoc_string());
                 ret.push_str(&attr.to_ldoc_string());
-                ret.push('\n');
             }
+            ret.push('\n');
         }
 
         let decl = match self.decl {
-            Declaration::Function(_, decl)
-            | Declaration::Variable(_, decl)
-            | Declaration::Other(decl) => decl.utf8_text(source).unwrap(),
+            Declaration::Function(_, decl) => {
+                let ret = decl.utf8_text(source).unwrap();
+                if let Some(body) = decl.child_by_field_name("body") {
+                    ret.replace(body.utf8_text(source).unwrap(), "")
+                } else {
+                    ret.to_string()
+                }
+            }
+            Declaration::Variable(_, decl) | Declaration::Other(decl) => {
+                decl.utf8_text(source).unwrap().to_string()
+            }
         };
 
-        ret.push_str(decl);
+        ret.push_str(&decl);
         ret.push('\n');
 
         ret

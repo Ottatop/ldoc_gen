@@ -6,6 +6,7 @@
 
 mod attr;
 mod chunk;
+mod parse;
 
 use std::{collections::HashMap, path::PathBuf};
 
@@ -16,13 +17,22 @@ use pcre2::bytes::Regex;
 use tree_sitter::{Node, TreeCursor};
 use walkdir::WalkDir;
 
+const OUTPUT_DIR: &str = ".ldoc_gen";
+
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     let mut parser = tree_sitter::Parser::new();
     parser.set_language(tree_sitter_lua::language())?;
 
-    for entry in WalkDir::new(&args.path) {
+    let out_dir = args.out_dir.join(OUTPUT_DIR);
+
+    std::fs::create_dir_all(&out_dir)?;
+
+    for entry in WalkDir::new(&args.path).into_iter().filter_entry(|entry| {
+        // skip output_dir
+        entry.file_name() != OUTPUT_DIR
+    }) {
         let entry = match entry {
             Ok(entry) => entry,
             Err(err) => {
@@ -41,13 +51,16 @@ fn main() -> anyhow::Result<()> {
             continue;
         }
 
-        let contents = std::fs::read_to_string(entry.path())?;
+        let mut contents = std::fs::read_to_string(entry.path())?
+            .replace('?', "|nil")
+            .replace("@type", "");
+
+        let _ = crate::attr::extract_alias(&mut contents);
+
         let Some(tree) = parser.parse(&contents, None) else {
             eprintln!("Failed to parse {}", entry.file_name().to_string_lossy());
             continue;
         };
-
-        std::fs::create_dir_all(&args.out_dir)?;
 
         let mut cursor = tree.walk();
 
@@ -56,6 +69,10 @@ fn main() -> anyhow::Result<()> {
         let mut comments = Vec::<Node>::new();
 
         let mut prev_line: Option<usize> = None;
+
+        // parse files into chunks
+        // A chunk is a bunch of comments annotating some function or declaration.
+        // TODO: parse @alias
         for child in cursor.node().children(&mut cursor) {
             let start_line = child.range().start_point.row;
             if child.kind() == "comment" {
@@ -123,6 +140,9 @@ fn main() -> anyhow::Result<()> {
 
         let mut ldoc_text = String::new();
 
+        // We have to place functions in a module/class in sections under the
+        // corresponding LDoc annotation. The loop below orders functions correctly
+        // as to not screw up LDoc generation.
         for chunk in mods_and_classes {
             let (Declaration::Function(Some(name), _) | Declaration::Variable(name, _)) =
                 &chunk.decl
@@ -130,7 +150,9 @@ fn main() -> anyhow::Result<()> {
                 continue;
             };
 
+            // println!("{}", chunk.to_ldoc_string(contents.as_bytes()));
             ldoc_text.push_str(&chunk.to_ldoc_string(contents.as_bytes()));
+            // println!("{ldoc_text}");
             if let Some(chunks) = methods.get(name.as_str()) {
                 for chunk in chunks.iter() {
                     ldoc_text.push_str(&chunk.to_ldoc_string(contents.as_bytes()));
@@ -142,7 +164,11 @@ fn main() -> anyhow::Result<()> {
             ldoc_text.push_str(&chunk.to_ldoc_string(contents.as_bytes()));
         }
 
-        std::fs::write(args.out_dir.join(entry.file_name()), ldoc_text)?;
+        // TODO: also follow relative directory, not just file name
+
+        crate::attr::replace_examples(&mut ldoc_text);
+
+        std::fs::write(out_dir.join(entry.file_name()), ldoc_text)?;
     }
 
     Ok(())
@@ -153,7 +179,7 @@ fn main() -> anyhow::Result<()> {
 struct Args {
     #[arg(short, long, default_value_os_t = PathBuf::from("."))]
     path: PathBuf,
-    #[arg(short, long, default_value_os_t = PathBuf::from("./.ldoc_gen"))]
+    #[arg(short, long, default_value_os_t = PathBuf::from("."))]
     out_dir: PathBuf,
 }
 
@@ -164,6 +190,9 @@ pub enum Declaration<'a> {
     Other(Node<'a>),
 }
 
+/// Parse comment blocks into two vectors: the first is a vector of summary/body comments
+/// as their nodes, and the second is a vector of attribute comments converted into
+/// [`Attribute`]s.
 fn parse_comments<'a>(
     comments: &[Node<'a>],
     source: &[u8],
@@ -318,9 +347,6 @@ fn node_to_decl<'a>(node: Node<'a>, cursor: &mut TreeCursor<'a>, source: &[u8]) 
                 Declaration::Other(node)
             }
         }
-        last => {
-            eprintln!("unknown decl: {last}");
-            Declaration::Other(node)
-        }
+        _ => Declaration::Other(node),
     }
 }

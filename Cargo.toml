@@ -11,6 +11,7 @@ walkdir = "2.3.3"
 anyhow = { version = "1.0.75", features = ["backtrace"] }
 tree-sitter = "0.20.10"
 tree-sitter-lua = "0.0.19"
-# regex = "1.9.3"
+regex = "1.9.3"
 # onig = "6.4.0"
 pcre2 = "0.2.4"
+id_tree = "1.8.0"
