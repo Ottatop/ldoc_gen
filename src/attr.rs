@@ -111,20 +111,14 @@ pub static ATTR_REGEXES: LazyLock<AttrRegexes> = LazyLock::new(|| {
 
 /// Replace all --- ### Examples with ---@usage
 pub fn replace_examples(source: &mut String) {
-    println!("source is {source}");
-    println!("REPLACING EXAMPLES");
     let captures = ATTR_REGEXES
         .example
         .captures_iter(source.as_bytes())
         .filter_map(|res| res.ok())
         .collect::<Vec<_>>();
-    println!("CAPTURES");
     let mut new_string = source.clone();
-    println!("NEW STRING");
     for capture in captures {
-        println!("HERE");
         if let Some(example) = capture.name("example") {
-            println!("GOT EXAMPLE");
             if let Ok(example) = std::str::from_utf8(example.as_bytes()) {
                 let mut s = String::new();
                 s.push_str("---@usage");
@@ -133,14 +127,12 @@ pub fn replace_examples(source: &mut String) {
                     std::str::from_utf8(capture.get(1).unwrap().as_bytes()).unwrap(),
                     &s,
                 );
-                println!("REPLACING");
             }
         } else {
             eprintln!("NO CAPTURES");
         }
     }
 
-    println!("SETTING STR");
     *source = new_string;
 }
 
