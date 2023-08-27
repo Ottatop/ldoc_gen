@@ -6,7 +6,6 @@
 
 mod attr;
 mod chunk;
-mod parse;
 
 use std::{collections::HashMap, path::PathBuf};
 
