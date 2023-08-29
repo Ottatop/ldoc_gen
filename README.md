@@ -75,6 +75,9 @@ function M.thingy(thing) end
 function M.thingy(thing) end
 ````
 
+- You can annotate something with `---@nodoc` to prevent `ldoc_gen` from generating LDoc-compatible code for it.
+- Placing text in a fenced code block in the summary will translate it into four-spaced code.
+
 ## Caveats
 This is *very* WIP software. The regex I wrote may not catch everything. If you encounter such a problem, please submit an issue.
 
