@@ -25,6 +25,7 @@ pub enum Attribute {
     Alias {
         types: String,
     },
+    NoDoc,
 }
 
 impl Attribute {
@@ -75,6 +76,7 @@ impl Attribute {
                 format!("---@see {link}")
             }
             Attribute::Alias { types: _ } => "".to_string(),
+            Attribute::NoDoc => "".to_string(),
         }
     }
 }
@@ -88,6 +90,7 @@ pub struct AttrRegexes {
     pub alias: Regex,
     pub example: Regex,
     pub fences: regex::Regex,
+    pub nodoc: regex::Regex,
 }
 
 pub static ATTR_REGEXES: LazyLock<AttrRegexes> = LazyLock::new(|| {
@@ -108,6 +111,7 @@ pub static ATTR_REGEXES: LazyLock<AttrRegexes> = LazyLock::new(|| {
         ).unwrap(),
         example: RegexBuilder::new().multi_line(true).build(r"(^[ \t]*---[ \t]*#{1,5}[ \t]*[E|e]xamples?.*$\s*([ \t]*---\s*)*---[ \t]*```.*$(?<example>(.*$\s*)*?)[ \t]*---[ \t]*```\s*)").unwrap(),
         fences: regex::RegexBuilder::new(r"(^[ \t]*---[ \t]*```.*\s*(?<lines>([ \t]*---[ \t]*(?<line>(.*$\s*)))*?)[ \t]*---[ \t]*```)").multi_line(true).build().unwrap(),
+        nodoc: regex::Regex::new(r"^[ \t]*---[ \t]*@nodoc").unwrap(),
     }
 });
 

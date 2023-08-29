@@ -50,10 +50,13 @@ fn main() -> anyhow::Result<()> {
             continue;
         }
 
+        // Replace all ? with |nil to make LDoc happy,
+        // and remove @type to fix warnings/errors
         let mut contents = std::fs::read_to_string(entry.path())?
             .replace('?', "|nil")
             .replace("@type", "");
 
+        // TODO:
         let _ = crate::attr::extract_alias(&mut contents);
 
         let Some(tree) = parser.parse(&contents, None) else {
@@ -103,12 +106,20 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
-        let (mods_and_classes, rest): (Vec<_>, _) = chunks.iter().partition(|chunk| {
-            chunk
-                .attributes
-                .iter()
-                .any(|attr| matches!(attr, Attribute::Class { .. }))
-        });
+        let (mods_and_classes, rest): (Vec<_>, _) = chunks
+            .iter()
+            .filter(|chunk| {
+                !chunk
+                    .attributes
+                    .iter()
+                    .any(|attr| matches!(attr, Attribute::NoDoc))
+            })
+            .partition(|chunk| {
+                chunk
+                    .attributes
+                    .iter()
+                    .any(|attr| matches!(attr, Attribute::Class { .. }))
+            });
 
         let mut methods = HashMap::<&str, Vec<&Chunk>>::new();
         const NO_NAME: &str = "_NO_NAME";
@@ -209,17 +220,11 @@ fn parse_comments<'a>(
         })
         .collect::<Vec<_>>();
 
-    let param_re = &ATTR_REGEXES.param;
-    let return_re = &ATTR_REGEXES.ret;
-    let see_re = &ATTR_REGEXES.see;
-    let class_re = &ATTR_REGEXES.class;
-    let classmod_re = &ATTR_REGEXES.classmod;
-
     let mut body = Vec::<Node>::new();
     let mut attributes = Vec::<Attribute>::new();
     for comment in comments {
         let text = comment.utf8_text(source)?; // TODO: not ?, continue
-        let attr = if let Ok(Some(captures)) = param_re.captures(text.as_bytes()) {
+        let attr = if let Ok(Some(captures)) = ATTR_REGEXES.param.captures(text.as_bytes()) {
             (|| {
                 Some(Attribute::Param {
                     name: std::str::from_utf8(captures.name("name")?.as_bytes())
@@ -233,7 +238,7 @@ fn parse_comments<'a>(
                     }),
                 })
             })()
-        } else if let Ok(Some(captures)) = return_re.captures(text.as_bytes()) {
+        } else if let Ok(Some(captures)) = ATTR_REGEXES.ret.captures(text.as_bytes()) {
             (|| {
                 Some(Attribute::Return {
                     ty: std::str::from_utf8(captures.name("ty")?.as_bytes())
@@ -247,7 +252,7 @@ fn parse_comments<'a>(
                     }),
                 })
             })()
-        } else if let Ok(Some(captures)) = see_re.captures(text.as_bytes()) {
+        } else if let Ok(Some(captures)) = ATTR_REGEXES.see.captures(text.as_bytes()) {
             (|| {
                 Some(Attribute::See {
                     link: std::str::from_utf8(captures.name("link")?.as_bytes())
@@ -258,7 +263,7 @@ fn parse_comments<'a>(
                     }),
                 })
             })()
-        } else if let Ok(Some(captures)) = class_re.captures(text.as_bytes()) {
+        } else if let Ok(Some(captures)) = ATTR_REGEXES.class.captures(text.as_bytes()) {
             (|| {
                 Some(Attribute::Class {
                     ty: std::str::from_utf8(captures.name("ty")?.as_bytes())
@@ -266,8 +271,12 @@ fn parse_comments<'a>(
                         .to_string(),
                 })
             })()
-        } else if let Ok(true) = classmod_re.is_match(text.as_bytes()) {
+        } else if let Ok(true) = ATTR_REGEXES.classmod.is_match(text.as_bytes()) {
             Some(Attribute::ClassMod)
+        } else if ATTR_REGEXES.nodoc.is_match(text) {
+            Some(Attribute::NoDoc)
+        } else if let Ok(true) = ATTR_REGEXES.alias.is_match(text.as_bytes()) {
+            panic!("@aliases weren't processed before parsing comments");
         } else {
             body.push(*comment);
             None
