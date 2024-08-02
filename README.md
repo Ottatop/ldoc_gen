@@ -1,3 +1,5 @@
+# ℹ️ This repository has been superseded by [lcat](https://github.com/Ottatop/lcat) and is no longer being maintained.
+
 # ldoc_gen
 Generate LDoc-compatible dummy code from LuaLS annotations
 
